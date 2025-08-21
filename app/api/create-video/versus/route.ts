@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { updateProgress } from '@/lib/progress';
 import { getFFmpegPath, getFFprobePath } from '@/lib/ffmpeg-config';
-import { getVideoProcessor, getVercelErrorMessage } from '@/lib/video-processor';
+import { getVideoProcessor } from '@/lib/video-processor';
 
 // Lazy require Node APIs only on the server
 let pathModule: any = null;
@@ -71,12 +71,10 @@ export async function POST(req: Request) {
     // Vérifier d'abord si le traitement vidéo est disponible
     const processor = await getVideoProcessor();
     if (!processor.isAvailable) {
-      console.error(getVercelErrorMessage());
+      console.error('FFmpeg not available');
       return NextResponse.json({ 
         success: false, 
-        error: 'Video processing not available on this platform',
-        details: getVercelErrorMessage(),
-        platform: 'vercel'
+        error: 'FFmpeg not available. Please install FFmpeg on your system.'
       }, { status: 503 });
     }
     

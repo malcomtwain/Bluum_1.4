@@ -18,7 +18,10 @@
       "Bash(npm uninstall:*)",
       "Bash(npm ls:*)",
       "Bash(npx tsc:*)",
-      "Bash(git merge:*)"
+      "Bash(git merge:*)",
+      "Bash(cat:*)",
+      "Bash(echo:*)",
+      "Bash(chmod:*)"
     ],
     "deny": []
   }
