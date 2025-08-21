@@ -17,7 +17,8 @@
       "Bash(npm install:*)",
       "Bash(npm uninstall:*)",
       "Bash(npm ls:*)",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(git merge:*)"
     ],
     "deny": []
   }
