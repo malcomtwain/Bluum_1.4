@@ -37,14 +37,7 @@ export default function RootLayout({
             <script dangerouslySetInnerHTML={{ __html: `
               // Force dark mode
               document.documentElement.classList.add('dark');
-              // Wait for body to exist before setting style
-              if (document.body) {
-                document.body.style.backgroundColor = '#0a0a0c';
-              } else {
-                document.addEventListener('DOMContentLoaded', function() {
-                  document.body.style.backgroundColor = '#0a0a0c';
-                });
-              }
+              document.body.style.backgroundColor = '#0a0a0c';
             `}} />
           </head>
           <body className={`${inter.className} bg-[#0a0a0c]`} suppressHydrationWarning>

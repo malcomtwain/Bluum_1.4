@@ -12,11 +12,10 @@ import { useRouter } from "next/navigation";
 
 // Fonction pour formater la durée en minutes:secondes
 function formatDuration(seconds: number | null | undefined) {
-  if (!seconds) return "0sec";
-  if (seconds <= 59) return `${Math.floor(seconds)}sec`;
+  if (!seconds) return "0:00";
   const minutes = Math.floor(seconds / 60);
   const remainingSeconds = Math.floor(seconds % 60);
-  return `${minutes}m${remainingSeconds.toString().padStart(2, '0')}`;
+  return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
 }
 
 export default function MusicPage() {
@@ -218,7 +217,7 @@ export default function MusicPage() {
         
         const duration = result.duration;
         
-        if (duration > 61) {
+        if (duration > 60) {
           toast.error(`${file.name} exceeds the 1-minute limit (${Math.round(duration)} seconds)`);
           // Marquer ce fichier comme terminé (avec erreur)
           setUploadingFiles(prev => ({...prev, [file.name]: false}));

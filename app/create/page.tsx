@@ -20,7 +20,6 @@ import 'react-toastify/dist/ReactToastify.css';
 import { useUserVideosStore } from "@/store/userVideosStore";
 import { downloadVideosAsZip } from "@/utils/zipDownloader";
 import { useRouter } from "next/navigation";
-import { uploadToCloudinary } from "@/lib/cloudinary-upload";
 
 type MediaFile = {
   id: string;
@@ -112,6 +111,10 @@ function getVersusCombinationCount(parts: {
     return n * fact(n - 1);
   }
   
+  // Goals est obligatoire pour le mode versus
+  const hasGoals = isEnabled('goals');
+  if (!hasGoals) return 0;
+  
   // Chaque partie peut permuter en interne
   const arrivesCount = isEnabled('arrivesStadium') ? fact(parts.arrivesStadium.length) : 1;
   const trainingCount = isEnabled('training') ? fact(parts.training.length) : 1;
@@ -123,30 +126,14 @@ function getVersusCombinationCount(parts: {
   // Pour skills et goals, mélange libre avec un goal qui doit finir avant celebration
   let skillsGoalsCount;
   const s = isEnabled('skills') ? parts.skills.length : 0;
-  const g = isEnabled('goals') ? parts.goals.length : 0;
+  const g = parts.goals.length; // Goals obligatoire
   
-  if (g === 0 && s === 0) {
-    // Pas de skills ni de goals, on ne compte pas cette partie
-    skillsGoalsCount = 1;
-  } else if (g === 0) {
-    // Seulement des skills, ils peuvent se permuter librement
-    skillsGoalsCount = fact(s);
-  } else if (s === 0) {
-    // Seulement des goals, ils peuvent se permuter librement
-    skillsGoalsCount = fact(g);
-  } else {
-    // Les deux : chaque goal peut être le dernier, et les autres se mélangent avec les skills
-    // Pour chaque choix de goal final : g possibilités
-    // Pour les éléments restants : (s + g - 1)! permutations
-    skillsGoalsCount = g * fact(s + g - 1);
-  }
+  if (g === 0) return 0; // Pas de vidéos sans goals
   
-  // Vérifier qu'au moins une partie est active avec des vidéos
-  const hasAnyVideos = isEnabled('arrivesStadium') || isEnabled('training') || isEnabled('entry') || 
-                       isEnabled('lineup') || isEnabled('faceCam') || isEnabled('skills') || 
-                       isEnabled('goals') || isEnabled('celebrations');
-  
-  if (!hasAnyVideos) return 0;
+  // Chaque goal peut être le dernier, et les autres se mélangent avec les skills
+  // Pour chaque choix de goal final : g possibilités
+  // Pour les éléments restants : (s + g - 1)! permutations
+  skillsGoalsCount = g * fact(s + g - 1);
   
   // Calculer le total
   return arrivesCount * trainingCount * entryCount * lineupCount * faceCamCount * skillsGoalsCount * celebrationsCount;
@@ -542,41 +529,6 @@ export default function CreatePage() {
     goals: [],
     celebrations: []
   });
-  
-  // État pour Max Combinaisons
-  const [maxCombinaisonsParts, setMaxCombinaisonsParts] = useState<{
-    part1: File[];
-    part2: File[];
-    part3: File[];
-    part4: File[];
-    part5: File[];
-    part6: File[];
-    part7: File[];
-    part8: File[];
-    part9: File[];
-    part10: File[];
-    logo: File[]; // Part 11 est le logo
-  }>({
-    part1: [],
-    part2: [],
-    part3: [],
-    part4: [],
-    part5: [],
-    part6: [],
-    part7: [],
-    part8: [],
-    part9: [],
-    part10: [],
-    logo: [] // Part 11 - logo
-  });
-  
-  // États pour les paramètres du logo
-  const [logoSize, setLogoSize] = useState<number>(10); // Taille en % (par défaut 10%)
-  const [logoPosition, setLogoPosition] = useState<'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' | 'center'>('top-right');
-  
-  // États pour stocker les hooks et logos
-  const [storedHooks, setStoredHooks] = useState<string[]>([]);
-  const [storedLogos, setStoredLogos] = useState<File[]>([]);
   
   // Plus de cases: on déduit automatiquement les parties actives des clips présents
   const versusEnabled = useMemo(() => ({
@@ -1060,7 +1012,7 @@ export default function CreatePage() {
       // Préparer les médias (Part 2)
       const selectedMediasList = Array.from(selectedMediaIndexes).map(index => selectedMedias[index]);
       
-      // Préparer les informations sur la musique (pas d'upload pour économiser le quota)
+      // Préparer les informations sur la musique
       const songInfo = {
         id: selectedSong.id,
         url: selectedSong.url
@@ -1134,35 +1086,7 @@ export default function CreatePage() {
       
       // Vérifier selon le modèle
       const isVersusMode = selectedModel === 'versus';
-      const isMaxCombinaisonsMode = selectedModel === 'max-combinaisons';
-      
-      if (isMaxCombinaisonsMode) {
-        // Vérifier que toutes les parties ont au moins une vidéo (sauf le logo qui est optionnel)
-        const partsArray = [
-          maxCombinaisonsParts.part1,
-          maxCombinaisonsParts.part2,
-          maxCombinaisonsParts.part3,
-          maxCombinaisonsParts.part4,
-          maxCombinaisonsParts.part5,
-          maxCombinaisonsParts.part6,
-          maxCombinaisonsParts.part7,
-          maxCombinaisonsParts.part8,
-          maxCombinaisonsParts.part9,
-          maxCombinaisonsParts.part10
-        ];
-        
-        const missingParts = partsArray.some(part => part.length === 0);
-        if (missingParts) {
-          toast.error("Please add at least 1 video for each part (1 to 10).");
-          setIsGenerating(false);
-          return;
-        }
-        if (!selectedSong) {
-          toast.error("Veuillez sélectionner une musique.");
-          setIsGenerating(false);
-          return;
-        }
-      } else if (isVersusMode) {
+      if (isVersusMode) {
         // Valider uniquement les parts activées
         const requiredMissing = (
           (versusEnabled.arrivesStadium && versusParts.arrivesStadium.length === 0) ||
@@ -1223,7 +1147,7 @@ export default function CreatePage() {
         
         setProgress(PROGRESS_STEPS.TEMPLATE_PREP);
         
-        // Convertir le template en base64 si nécessaire (temporaire jusqu'à augmentation du quota Blob)
+        // Convertir l'URL du template en base64 si nécessaire
         let templateUrl = selectedTemplateObj.url;
         let templateType = (selectedTemplateObj.type as 'image' | 'video') || 'image';
         
@@ -1277,7 +1201,7 @@ export default function CreatePage() {
       if (!isVersusMode) {
         const selectedMediasList = Array.from(selectedMediaIndexes).map(index => selectedMedias[index]);
         
-        // Convertir les URLs des médias si nécessaire (temporaire jusqu'à augmentation du quota Blob)
+        // Convertir les URLs des médias si nécessaire
         selectedMediasData = await Promise.all(selectedMediasList.map(async (media) => {
           if (!media.url) return media;
           
@@ -1315,45 +1239,7 @@ export default function CreatePage() {
       // Déterminer le nombre de vidéos à générer
       let totalVideos = hookLines.length;
       let versusCombos: File[][] = [];
-      let maxCombinaisonsCombos: File[][] = [];
-      
-      if (isMaxCombinaisonsMode) {
-        // Générer toutes les combinaisons possibles pour Max Combinaisons (10 parties, sans le logo)
-        const partsArrays = [
-          maxCombinaisonsParts.part1,
-          maxCombinaisonsParts.part2,
-          maxCombinaisonsParts.part3,
-          maxCombinaisonsParts.part4,
-          maxCombinaisonsParts.part5,
-          maxCombinaisonsParts.part6,
-          maxCombinaisonsParts.part7,
-          maxCombinaisonsParts.part8,
-          maxCombinaisonsParts.part9,
-          maxCombinaisonsParts.part10
-        ];
-        
-        // Fonction pour générer toutes les combinaisons possibles (produit cartésien)
-        function generateAllCombinations(arrays: File[][]): File[][] {
-          if (arrays.length === 0) return [[]];
-          if (arrays.length === 1) return arrays[0].map(item => [item]);
-          
-          const [first, ...rest] = arrays;
-          const restCombinations = generateAllCombinations(rest);
-          const result: File[][] = [];
-          
-          for (const item of first) {
-            for (const combo of restCombinations) {
-              result.push([item, ...combo]);
-            }
-          }
-          
-          return result;
-        }
-        
-        maxCombinaisonsCombos = generateAllCombinations(partsArrays);
-        totalVideos = maxCombinaisonsCombos.length;
-        console.log('DEBUG: maxCombinaisonsCombos générées:', maxCombinaisonsCombos.length);
-      } else if (isVersusMode) {
+      if (isVersusMode) {
         const A = versusParts.arrivesStadium;
         const B = versusParts.training;
         const C = versusParts.entry;
@@ -1476,7 +1362,7 @@ export default function CreatePage() {
       }
       setTotalToGenerate(totalVideos);
       
-      // Préparer les informations sur la musique (pas d'upload pour économiser le quota)
+      // Préparer les informations sur la musique
       const songInfo = {
         id: selectedSong.id,
         url: selectedSong.url
@@ -1597,32 +1483,15 @@ export default function CreatePage() {
         
           // Préparer les données pour l'API
           let data: any;
-          if (isMaxCombinaisonsMode) {
-            const combo = maxCombinaisonsCombos[i];
-            // Uploader vers Cloudinary
-            console.log(`Upload des parties Max Combinaisons vers Cloudinary...`);
-            const partsDataUrls = await Promise.all(combo.map(async (f, idx) => {
-              const resourceType = f.type?.startsWith('video/') ? 'video' : 'image';
-              console.log(`Upload partie ${idx + 1}/${combo.length}...`);
-              const url = await uploadToCloudinary(f, resourceType);
-              return {
-                url,
-                type: f.type?.startsWith('video/') ? 'video' : 'image',
-              };
-            }));
+          if (isVersusMode) {
+            const combo = versusCombos[i];
+            // Convertir en data URL car le serveur ne peut pas lire blob:
+            const fileToDataUrl = (f: File) => new Promise<string>((resolve, reject) => { const r = new FileReader(); r.onload = () => resolve(r.result as string); r.onerror = () => reject(new Error('read error')); r.readAsDataURL(f); });
+            const partsDataUrls = await Promise.all(combo.map(async (f) => ({
+              url: await fileToDataUrl(f),
+              type: f.type?.startsWith('video/') ? 'video' : 'image',
+            })));
 
-            // Préparer le logo si présent
-            let logoData = null;
-            if (maxCombinaisonsParts.logo.length > 0) {
-              console.log('Upload du logo vers Cloudinary...');
-              const logoUrl = await uploadToCloudinary(maxCombinaisonsParts.logo[0], 'image');
-              logoData = {
-                url: logoUrl,
-                size: logoSize,
-                position: logoPosition
-              };
-            }
-            
             data = {
               hook: {
                 text: hook,
@@ -1632,91 +1501,8 @@ export default function CreatePage() {
               },
               parts: partsDataUrls,
               song: songInfo,
-              logo: logoData,
-              mode: 'max-combinaisons'
+              mode: 'versus'
             };
-          } else if (isVersusMode) {
-            const combo = versusCombos[i];
-            // Pour le mode Versus, uploader vers Cloudinary puis envoyer les URLs
-            
-            // Traiter chaque partie une par une
-            const partVideos: string[] = [];
-            for (let partIdx = 0; partIdx < combo.length; partIdx++) {
-              const part = combo[partIdx];
-              console.log(`Upload de la partie ${partIdx + 1}/${combo.length} vers Cloudinary...`);
-              
-              try {
-                // Uploader vers Cloudinary
-                const resourceType = part.type?.startsWith('video/') ? 'video' : 'image';
-                const cloudinaryUrl = await uploadToCloudinary(part, resourceType);
-                console.log(`Partie ${partIdx + 1} uploadée avec succès vers Cloudinary`);
-                
-                // Créer l'objet avec l'URL Cloudinary
-                const partDataUrl = {
-                  url: cloudinaryUrl,
-                  type: part.type?.startsWith('video/') ? 'video' : 'image',
-                };
-                
-                // Créer une requête pour cette partie uniquement
-                const partData = {
-                hook: {
-                  text: hook,
-                  style: currentStyle,
-                  position: currentStyle === 1 ? style1Position.position : style2Position.position,
-                  offset: currentStyle === 1 ? style1Position.offset : style2Position.offset
-                },
-                parts: [partDataUrl], // Une seule partie à la fois
-                song: songInfo,
-                mode: 'versus',
-                isSinglePart: true,
-                partNumber: partIdx + 1,
-                totalParts: combo.length
-              };
-              
-              // Envoyer cette partie au serveur
-              try {
-                const response = await fetch('/api/create-video/versus', {
-                  method: 'POST',
-                  headers: {
-                    'Content-Type': 'application/json',
-                  },
-                  body: JSON.stringify(partData),
-                });
-                
-                if (response.ok) {
-                  const result = await response.json();
-                  partVideos.push(result.videoPath);
-                  console.log(`Partie ${partIdx + 1}/${combo.length} créée avec succès`);
-                } else {
-                  const errorText = await response.text();
-                  console.error(`Erreur pour la partie ${partIdx + 1}:`, errorText);
-                  toast.error(`Erreur partie ${partIdx + 1}: ${errorText}`);
-                }
-                } catch (error) {
-                  console.error(`Erreur lors de la création de la partie ${partIdx + 1}:`, error);
-                  toast.error(`Erreur partie ${partIdx + 1}`);
-                }
-              } catch (uploadError) {
-                console.error(`Erreur lors de l'upload Cloudinary pour la partie ${partIdx + 1}:`, uploadError);
-                toast.error(`Erreur d'upload partie ${partIdx + 1}`);
-                continue; // Passer à la partie suivante
-              }
-              
-              // Mettre à jour la progression
-              const partProgress = ((i + (partIdx + 1) / combo.length) / totalVideos) * 100;
-              setProgress(partProgress);
-            }
-            
-            // Si on a créé toutes les parties, on a fini cette vidéo
-            if (partVideos.length === combo.length) {
-              console.log(`Vidéo Versus ${i + 1} complète avec ${partVideos.length} parties`);
-              setGeneratedVideos(prev => [...prev, ...partVideos]);
-            }
-            
-            // On continue la boucle principale sans faire d'autre requête
-            // Marquer data comme undefined pour éviter la requête normale
-            data = undefined as any;
-            continue;
           } else {
             data = {
               hook: {
@@ -1746,25 +1532,9 @@ export default function CreatePage() {
             };
           }
           
-        // Si on est en mode Versus et qu'on a déjà traité les parties, on skip cette partie
-        if (isVersusMode && !data) {
-          // Les parties ont déjà été traitées individuellement
-          clearInterval(progressInterval);
-          count++;
-          setGeneratedCount(count);
-          setProgress(Math.round((count / totalVideos) * 100));
-          continue;
-        }
-        
         try {
           // Envoi au serveur
-          const apiEndpoint = isMaxCombinaisonsMode 
-            ? '/api/create-video/max-combinaisons' 
-            : isVersusMode 
-              ? '/api/create-video/versus' 
-              : '/api/create-video';
-          
-          const response = await fetch(apiEndpoint, {
+          const response = await fetch(isVersusMode ? '/api/create-video/versus' : '/api/create-video', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -2010,24 +1780,6 @@ export default function CreatePage() {
 
   const removeVersusVideo = (part: 'arrivesStadium' | 'training' | 'entry' | 'lineup' | 'faceCam' | 'skills' | 'goals' | 'celebrations', index: number) => {
     setVersusParts(prev => ({
-      ...prev,
-      [part]: prev[part].filter((_, i) => i !== index)
-    }));
-  };
-
-  const handleMaxCombinaisonsVideoUpload = (part: 'part1' | 'part2' | 'part3' | 'part4' | 'part5' | 'part6' | 'part7' | 'part8' | 'part9' | 'part10' | 'logo') => (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(event.target.files || []);
-    if (files.length > 0) {
-      setMaxCombinaisonsParts(prev => ({
-        ...prev,
-        [part]: [...prev[part], ...files]
-      }));
-    }
-    event.target.value = '';
-  };
-
-  const removeMaxCombinaisonsVideo = (part: 'part1' | 'part2' | 'part3' | 'part4' | 'part5' | 'part6' | 'part7' | 'part8' | 'part9' | 'part10' | 'logo', index: number) => {
-    setMaxCombinaisonsParts(prev => ({
       ...prev,
       [part]: prev[part].filter((_, i) => i !== index)
     }));
@@ -2478,7 +2230,6 @@ export default function CreatePage() {
                     >
                       <option value="model-50">1 / ∞</option>
                      <option value="versus">Versus</option>
-                     <option value="max-combinaisons">Max Combinaisons</option>
                     </select>
                   </div>
                 </div>
@@ -2683,560 +2434,8 @@ export default function CreatePage() {
                     </section>
                   </div>
 
-                  {/* Second Row - Hooks and Logos Storage */}
-                  <div className="grid grid-cols-1 [@media(min-width:1000px)]:grid-cols-2 gap-4">
-                  </div>
-
                   {/* Bottom Row - Templates and Videos */}
-                  {selectedModel === 'max-combinaisons' ? (
-                    // Layout Max Combinaisons - steps 3–12 (10 parts)
-                    <div className="col-span-1">
-                      <div className="grid grid-cols-1 [@media(min-width:1000px)]:grid-cols-2 gap-4">
-                        {/* Part 1 */}
-                        <section className="space-y-4 bg-[#f3f4ee] dark:bg-[#0e0f15] p-4 rounded-xl shadow-sm min-h-[280px]">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                              <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-[#fafafa] text-[#0a0a0c] font-bold text-sm border border-gray-200 dark:border-[#18181a]">3</div>
-                              <h2 className="text-base font-bold dark:text-white">Part 1</h2>
-                            </div>
-                            <div className="relative flex items-center gap-3">
-                              <input
-                                type="file"
-                                accept="video/*"
-                                multiple
-                                onChange={handleMaxCombinaisonsVideoUpload('part1')}
-                                className="hidden"
-                                id="part1-videos"
-                              />
-                              <label
-                                htmlFor="part1-videos"
-                                className="px-3 py-1.5 bg-[#202123] text-white rounded-lg hover:bg-[#202123]/90 transition-colors cursor-pointer flex items-center gap-2 text-sm font-normal"
-                              >
-                                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                  <path d="M3 14v5a2 2 0 002 2h14a2 2 0 002-2v-5M12 3v12M5 10l7-7 7 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                                </svg>
-                                Upload
-                              </label>
-                            </div>
-                          </div>
-                          <div className="bg-white/30 dark:bg-[#18181a] p-3 rounded-lg">
-                            <div className="text-xs text-gray-600 dark:text-gray-300 mb-2">
-                              {maxCombinaisonsParts.part1.length} videos
-                            </div>
-                            <div className="grid grid-cols-3 gap-1 max-h-[120px] overflow-y-auto">
-                              {maxCombinaisonsParts.part1.map((video, index) => (
-                                <div key={index} className="relative aspect-[9/16] rounded overflow-hidden border border-gray-200 dark:border-gray-600">
-                                  <video
-                                    src={URL.createObjectURL(video)}
-                                    className="w-full h-full object-cover"
-                                    muted
-                                  />
-                                  <button
-                                    onClick={() => removeMaxCombinaisonsVideo('part1', index)}
-                                    className="absolute top-0.5 right-0.5 bg-red-500 hover:bg-red-600 text-white rounded-full p-0.5 opacity-80 hover:opacity-100 transition-opacity"
-                                    title="Remove video"
-                                  >
-                                    <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor">
-                                      <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
-                                    </svg>
-                                  </button>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        </section>
-
-                        {/* Part 2 */}
-                        <section className="space-y-4 bg-[#f3f4ee] dark:bg-[#0e0f15] p-4 rounded-xl shadow-sm min-h-[280px]">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                              <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-[#fafafa] text-[#0a0a0c] font-bold text-sm border border-gray-200 dark:border-[#18181a]">4</div>
-                              <h2 className="text-base font-bold dark:text-white">Part 2</h2>
-                            </div>
-                            <div className="relative flex items-center gap-3">
-                              <input type="file" accept="video/*" multiple onChange={handleMaxCombinaisonsVideoUpload('part2')} className="hidden" id="part2-videos" />
-                              <label htmlFor="part2-videos" className="px-3 py-1.5 bg-[#202123] text-white rounded-lg hover:bg-[#202123]/90 transition-colors cursor-pointer flex items-center gap-2 text-sm font-normal">
-                                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                  <path d="M3 14v5a2 2 0 002 2h14a2 2 0 002-2v-5M12 3v12M5 10l7-7 7 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                                </svg>
-                                Upload
-                              </label>
-                            </div>
-                          </div>
-                          <div className="bg-white/30 dark:bg-[#18181a] p-3 rounded-lg">
-                            <div className="text-xs text-gray-600 dark:text-gray-300 mb-2">{maxCombinaisonsParts.part2.length} videos</div>
-                            <div className="grid grid-cols-3 gap-1 max-h-[120px] overflow-y-auto">
-                              {maxCombinaisonsParts.part2.map((video, index) => (
-                                <div key={index} className="relative aspect-[9/16] rounded overflow-hidden border border-gray-200 dark:border-gray-600">
-                                  <video src={URL.createObjectURL(video)} className="w-full h-full object-cover" muted />
-                                  <button onClick={() => removeMaxCombinaisonsVideo('part2', index)} className="absolute top-0.5 right-0.5 bg-red-500 hover:bg-red-600 text-white rounded-full p-0.5 opacity-80 hover:opacity-100 transition-opacity" title="Remove video">
-                                    <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor">
-                                      <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
-                                    </svg>
-                                  </button>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        </section>
-
-                        {/* Part 3 */}
-                        <section className="space-y-4 bg-[#f3f4ee] dark:bg-[#0e0f15] p-4 rounded-xl shadow-sm min-h-[280px]">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                              <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-[#fafafa] text-[#0a0a0c] font-bold text-sm border border-gray-200 dark:border-[#18181a]">5</div>
-                              <h2 className="text-base font-bold dark:text-white">Part 3</h2>
-                            </div>
-                            <div className="relative flex items-center gap-3">
-                              <input type="file" accept="video/*" multiple onChange={handleMaxCombinaisonsVideoUpload('part3')} className="hidden" id="part3-videos" />
-                              <label htmlFor="part3-videos" className="px-3 py-1.5 bg-[#202123] text-white rounded-lg hover:bg-[#202123]/90 transition-colors cursor-pointer flex items-center gap-2 text-sm font-normal">
-                                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                  <path d="M3 14v5a2 2 0 002 2h14a2 2 0 002-2v-5M12 3v12M5 10l7-7 7 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                                </svg>
-                                Upload
-                              </label>
-                            </div>
-                          </div>
-                          <div className="bg-white/30 dark:bg-[#18181a] p-3 rounded-lg">
-                            <div className="text-xs text-gray-600 dark:text-gray-300 mb-2">{maxCombinaisonsParts.part3.length} videos</div>
-                            <div className="grid grid-cols-3 gap-1 max-h-[120px] overflow-y-auto">
-                              {maxCombinaisonsParts.part3.map((video, index) => (
-                                <div key={index} className="relative aspect-[9/16] rounded overflow-hidden border border-gray-200 dark:border-gray-600">
-                                  <video src={URL.createObjectURL(video)} className="w-full h-full object-cover" muted />
-                                  <button onClick={() => removeMaxCombinaisonsVideo('part3', index)} className="absolute top-0.5 right-0.5 bg-red-500 hover:bg-red-600 text-white rounded-full p-0.5 opacity-80 hover:opacity-100 transition-opacity" title="Remove video">
-                                    <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor">
-                                      <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
-                                    </svg>
-                                  </button>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        </section>
-
-                        {/* Part 4 */}
-                        <section className="space-y-4 bg-[#f3f4ee] dark:bg-[#0e0f15] p-4 rounded-xl shadow-sm min-h-[280px]">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                              <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-[#fafafa] text-[#0a0a0c] font-bold text-sm border border-gray-200 dark:border-[#18181a]">6</div>
-                              <h2 className="text-base font-bold dark:text-white">Part 4</h2>
-                            </div>
-                            <div className="relative flex items-center gap-3">
-                              <input type="file" accept="video/*" multiple onChange={handleMaxCombinaisonsVideoUpload('part4')} className="hidden" id="part4-videos" />
-                              <label htmlFor="part4-videos" className="px-3 py-1.5 bg-[#202123] text-white rounded-lg hover:bg-[#202123]/90 transition-colors cursor-pointer flex items-center gap-2 text-sm font-normal">
-                                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                  <path d="M3 14v5a2 2 0 002 2h14a2 2 0 002-2v-5M12 3v12M5 10l7-7 7 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                                </svg>
-                                Upload
-                              </label>
-                            </div>
-                          </div>
-                          <div className="bg-white/30 dark:bg-[#18181a] p-3 rounded-lg">
-                            <div className="text-xs text-gray-600 dark:text-gray-300 mb-2">{maxCombinaisonsParts.part4.length} videos</div>
-                            <div className="grid grid-cols-3 gap-1 max-h-[120px] overflow-y-auto">
-                              {maxCombinaisonsParts.part4.map((video, index) => (
-                                <div key={index} className="relative aspect-[9/16] rounded overflow-hidden border border-gray-200 dark:border-gray-600">
-                                  <video src={URL.createObjectURL(video)} className="w-full h-full object-cover" muted />
-                                  <button onClick={() => removeMaxCombinaisonsVideo('part4', index)} className="absolute top-0.5 right-0.5 bg-red-500 hover:bg-red-600 text-white rounded-full p-0.5 opacity-80 hover:opacity-100 transition-opacity" title="Remove video">
-                                    <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor">
-                                      <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
-                                    </svg>
-                                  </button>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        </section>
-
-                        {/* Part 5 */}
-                        <section className="space-y-4 bg-[#f3f4ee] dark:bg-[#0e0f15] p-4 rounded-xl shadow-sm min-h-[280px]">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                              <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-[#fafafa] text-[#0a0a0c] font-bold text-sm border border-gray-200 dark:border-[#18181a]">7</div>
-                              <h2 className="text-base font-bold dark:text-white">Part 5</h2>
-                            </div>
-                            <div className="relative flex items-center gap-3">
-                              <input type="file" accept="video/*" multiple onChange={handleMaxCombinaisonsVideoUpload('part5')} className="hidden" id="part5-videos" />
-                              <label htmlFor="part5-videos" className="px-3 py-1.5 bg-[#202123] text-white rounded-lg hover:bg-[#202123]/90 transition-colors cursor-pointer flex items-center gap-2 text-sm font-normal">
-                                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                  <path d="M3 14v5a2 2 0 002 2h14a2 2 0 002-2v-5M12 3v12M5 10l7-7 7 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                                </svg>
-                                Upload
-                              </label>
-                            </div>
-                          </div>
-                          <div className="bg-white/30 dark:bg-[#18181a] p-3 rounded-lg">
-                            <div className="text-xs text-gray-600 dark:text-gray-300 mb-2">{maxCombinaisonsParts.part5.length} videos</div>
-                            <div className="grid grid-cols-3 gap-1 max-h-[120px] overflow-y-auto">
-                              {maxCombinaisonsParts.part5.map((video, index) => (
-                                <div key={index} className="relative aspect-[9/16] rounded overflow-hidden border border-gray-200 dark:border-gray-600">
-                                  <video src={URL.createObjectURL(video)} className="w-full h-full object-cover" muted />
-                                  <button onClick={() => removeMaxCombinaisonsVideo('part5', index)} className="absolute top-0.5 right-0.5 bg-red-500 hover:bg-red-600 text-white rounded-full p-0.5 opacity-80 hover:opacity-100 transition-opacity" title="Remove video">
-                                    <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor">
-                                      <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
-                                    </svg>
-                                  </button>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        </section>
-
-                        {/* Part 6 */}
-                        <section className="space-y-4 bg-[#f3f4ee] dark:bg-[#0e0f15] p-4 rounded-xl shadow-sm min-h-[280px]">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                              <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-[#fafafa] text-[#0a0a0c] font-bold text-sm border border-gray-200 dark:border-[#18181a]">8</div>
-                              <h2 className="text-base font-bold dark:text-white">Part 6</h2>
-                            </div>
-                            <div className="relative flex items-center gap-3">
-                              <input type="file" accept="video/*" multiple onChange={handleMaxCombinaisonsVideoUpload('part6')} className="hidden" id="part6-videos" />
-                              <label htmlFor="part6-videos" className="px-3 py-1.5 bg-[#202123] text-white rounded-lg hover:bg-[#202123]/90 transition-colors cursor-pointer flex items-center gap-2 text-sm font-normal">
-                                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                  <path d="M3 14v5a2 2 0 002 2h14a2 2 0 002-2v-5M12 3v12M5 10l7-7 7 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                                </svg>
-                                Upload
-                              </label>
-                            </div>
-                          </div>
-                          <div className="bg-white/30 dark:bg-[#18181a] p-3 rounded-lg">
-                            <div className="text-xs text-gray-600 dark:text-gray-300 mb-2">{maxCombinaisonsParts.part6.length} videos</div>
-                            <div className="grid grid-cols-3 gap-1 max-h-[120px] overflow-y-auto">
-                              {maxCombinaisonsParts.part6.map((video, index) => (
-                                <div key={index} className="relative aspect-[9/16] rounded overflow-hidden border border-gray-200 dark:border-gray-600">
-                                  <video src={URL.createObjectURL(video)} className="w-full h-full object-cover" muted />
-                                  <button onClick={() => removeMaxCombinaisonsVideo('part6', index)} className="absolute top-0.5 right-0.5 bg-red-500 hover:bg-red-600 text-white rounded-full p-0.5 opacity-80 hover:opacity-100 transition-opacity" title="Remove video">
-                                    <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor">
-                                      <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
-                                    </svg>
-                                  </button>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        </section>
-
-                        {/* Part 7 */}
-                        <section className="space-y-4 bg-[#f3f4ee] dark:bg-[#0e0f15] p-4 rounded-xl shadow-sm min-h-[280px]">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                              <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-[#fafafa] text-[#0a0a0c] font-bold text-sm border border-gray-200 dark:border-[#18181a]">9</div>
-                              <h2 className="text-base font-bold dark:text-white">Part 7</h2>
-                            </div>
-                            <div className="relative flex items-center gap-3">
-                              <input type="file" accept="video/*" multiple onChange={handleMaxCombinaisonsVideoUpload('part7')} className="hidden" id="part7-videos" />
-                              <label htmlFor="part7-videos" className="px-3 py-1.5 bg-[#202123] text-white rounded-lg hover:bg-[#202123]/90 transition-colors cursor-pointer flex items-center gap-2 text-sm font-normal">
-                                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                  <path d="M3 14v5a2 2 0 002 2h14a2 2 0 002-2v-5M12 3v12M5 10l7-7 7 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                                </svg>
-                                Upload
-                              </label>
-                            </div>
-                          </div>
-                          <div className="bg-white/30 dark:bg-[#18181a] p-3 rounded-lg">
-                            <div className="text-xs text-gray-600 dark:text-gray-300 mb-2">{maxCombinaisonsParts.part7.length} videos</div>
-                            <div className="grid grid-cols-3 gap-1 max-h-[120px] overflow-y-auto">
-                              {maxCombinaisonsParts.part7.map((video, index) => (
-                                <div key={index} className="relative aspect-[9/16] rounded overflow-hidden border border-gray-200 dark:border-gray-600">
-                                  <video src={URL.createObjectURL(video)} className="w-full h-full object-cover" muted />
-                                  <button onClick={() => removeMaxCombinaisonsVideo('part7', index)} className="absolute top-0.5 right-0.5 bg-red-500 hover:bg-red-600 text-white rounded-full p-0.5 opacity-80 hover:opacity-100 transition-opacity" title="Remove video">
-                                    <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor">
-                                      <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
-                                    </svg>
-                                  </button>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        </section>
-
-                        {/* Part 8 */}
-                        <section className="space-y-4 bg-[#f3f4ee] dark:bg-[#0e0f15] p-4 rounded-xl shadow-sm min-h-[280px]">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                              <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-[#fafafa] text-[#0a0a0c] font-bold text-sm border border-gray-200 dark:border-[#18181a]">10</div>
-                              <h2 className="text-base font-bold dark:text-white">Part 8</h2>
-                            </div>
-                            <div className="relative flex items-center gap-3">
-                              <input type="file" accept="video/*" multiple onChange={handleMaxCombinaisonsVideoUpload('part8')} className="hidden" id="part8-videos" />
-                              <label htmlFor="part8-videos" className="px-3 py-1.5 bg-[#202123] text-white rounded-lg hover:bg-[#202123]/90 transition-colors cursor-pointer flex items-center gap-2 text-sm font-normal">
-                                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                  <path d="M3 14v5a2 2 0 002 2h14a2 2 0 002-2v-5M12 3v12M5 10l7-7 7 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                                </svg>
-                                Upload
-                              </label>
-                            </div>
-                          </div>
-                          <div className="bg-white/30 dark:bg-[#18181a] p-3 rounded-lg">
-                            <div className="text-xs text-gray-600 dark:text-gray-300 mb-2">{maxCombinaisonsParts.part8.length} videos</div>
-                            <div className="grid grid-cols-3 gap-1 max-h-[120px] overflow-y-auto">
-                              {maxCombinaisonsParts.part8.map((video, index) => (
-                                <div key={index} className="relative aspect-[9/16] rounded overflow-hidden border border-gray-200 dark:border-gray-600">
-                                  <video src={URL.createObjectURL(video)} className="w-full h-full object-cover" muted />
-                                  <button onClick={() => removeMaxCombinaisonsVideo('part8', index)} className="absolute top-0.5 right-0.5 bg-red-500 hover:bg-red-600 text-white rounded-full p-0.5 opacity-80 hover:opacity-100 transition-opacity" title="Remove video">
-                                    <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor">
-                                      <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
-                                    </svg>
-                                  </button>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        </section>
-
-                        {/* Part 9 */}
-                        <section className="space-y-4 bg-[#f3f4ee] dark:bg-[#0e0f15] p-4 rounded-xl shadow-sm min-h-[280px]">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                              <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-[#fafafa] text-[#0a0a0c] font-bold text-sm border border-gray-200 dark:border-[#18181a]">11</div>
-                              <h2 className="text-base font-bold dark:text-white">Part 9</h2>
-                            </div>
-                            <div className="relative flex items-center gap-3">
-                              <input type="file" accept="video/*" multiple onChange={handleMaxCombinaisonsVideoUpload('part9')} className="hidden" id="part9-videos" />
-                              <label htmlFor="part9-videos" className="px-3 py-1.5 bg-[#202123] text-white rounded-lg hover:bg-[#202123]/90 transition-colors cursor-pointer flex items-center gap-2 text-sm font-normal">
-                                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                  <path d="M3 14v5a2 2 0 002 2h14a2 2 0 002-2v-5M12 3v12M5 10l7-7 7 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                                </svg>
-                                Upload
-                              </label>
-                            </div>
-                          </div>
-                          <div className="bg-white/30 dark:bg-[#18181a] p-3 rounded-lg">
-                            <div className="text-xs text-gray-600 dark:text-gray-300 mb-2">{maxCombinaisonsParts.part9.length} videos</div>
-                            <div className="grid grid-cols-3 gap-1 max-h-[120px] overflow-y-auto">
-                              {maxCombinaisonsParts.part9.map((video, index) => (
-                                <div key={index} className="relative aspect-[9/16] rounded overflow-hidden border border-gray-200 dark:border-gray-600">
-                                  <video src={URL.createObjectURL(video)} className="w-full h-full object-cover" muted />
-                                  <button onClick={() => removeMaxCombinaisonsVideo('part9', index)} className="absolute top-0.5 right-0.5 bg-red-500 hover:bg-red-600 text-white rounded-full p-0.5 opacity-80 hover:opacity-100 transition-opacity" title="Remove video">
-                                    <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor">
-                                      <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
-                                    </svg>
-                                  </button>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        </section>
-
-                        {/* Part 10 */}
-                        <section className="space-y-4 bg-[#f3f4ee] dark:bg-[#0e0f15] p-4 rounded-xl shadow-sm min-h-[280px]">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                              <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-[#fafafa] text-[#0a0a0c] font-bold text-sm border border-gray-200 dark:border-[#18181a]">12</div>
-                              <h2 className="text-base font-bold dark:text-white">Part 10</h2>
-                            </div>
-                            <div className="relative flex items-center gap-3">
-                              <input type="file" accept="video/*" multiple onChange={handleMaxCombinaisonsVideoUpload('part10')} className="hidden" id="part10-videos" />
-                              <label htmlFor="part10-videos" className="px-3 py-1.5 bg-[#202123] text-white rounded-lg hover:bg-[#202123]/90 transition-colors cursor-pointer flex items-center gap-2 text-sm font-normal">
-                                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                  <path d="M3 14v5a2 2 0 002 2h14a2 2 0 002-2v-5M12 3v12M5 10l7-7 7 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                                </svg>
-                                Upload
-                              </label>
-                            </div>
-                          </div>
-                          <div className="bg-white/30 dark:bg-[#18181a] p-3 rounded-lg">
-                            <div className="text-xs text-gray-600 dark:text-gray-300 mb-2">{maxCombinaisonsParts.part10.length} videos</div>
-                            <div className="grid grid-cols-3 gap-1 max-h-[120px] overflow-y-auto">
-                              {maxCombinaisonsParts.part10.map((video, index) => (
-                                <div key={index} className="relative aspect-[9/16] rounded overflow-hidden border border-gray-200 dark:border-gray-600">
-                                  <video src={URL.createObjectURL(video)} className="w-full h-full object-cover" muted />
-                                  <button onClick={() => removeMaxCombinaisonsVideo('part10', index)} className="absolute top-0.5 right-0.5 bg-red-500 hover:bg-red-600 text-white rounded-full p-0.5 opacity-80 hover:opacity-100 transition-opacity" title="Remove video">
-                                    <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor">
-                                      <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
-                                    </svg>
-                                  </button>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        </section>
-
-                        {/* Part 11 - Logo */}
-                        <section className="space-y-4 bg-gradient-to-br from-purple-50 to-pink-50 dark:from-purple-900/20 dark:to-pink-900/20 p-4 rounded-xl shadow-sm min-h-[280px] [@media(min-width:1000px)]:col-span-2">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                              <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-gradient-to-br from-purple-600 to-pink-600 text-white font-bold text-sm">
-                                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                  <path d="M12 2L2 7v10c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-10-5z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                                </svg>
-                              </div>
-                              <h2 className="text-base font-bold dark:text-white">Logo (Part 11)</h2>
-                              <span className="text-xs bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300 px-2 py-1 rounded-full">Optional - Will overlay on all videos</span>
-                            </div>
-                            <div className="relative flex items-center gap-3">
-                              <input type="file" accept="image/*" onChange={handleMaxCombinaisonsVideoUpload('logo')} className="hidden" id="logo-upload" />
-                              <label htmlFor="logo-upload" className="px-3 py-1.5 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-lg hover:from-purple-700 hover:to-pink-700 transition-colors cursor-pointer flex items-center gap-2 text-sm font-normal">
-                                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                  <path d="M3 14v5a2 2 0 002 2h14a2 2 0 002-2v-5M12 3v12M5 10l7-7 7 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                                </svg>
-                                Upload Logo
-                              </label>
-                            </div>
-                          </div>
-                          <div className="bg-white/50 dark:bg-[#18181a]/50 p-3 rounded-lg">
-                            {maxCombinaisonsParts.logo.length > 0 ? (
-                              <div className="space-y-4">
-                                {/* Logo preview avec contrôles */}
-                                <div className="flex items-center justify-center">
-                                  <div className="relative">
-                                    <img 
-                                      src={URL.createObjectURL(maxCombinaisonsParts.logo[0])} 
-                                      className="max-h-32 max-w-full object-contain rounded-lg shadow-lg" 
-                                      alt="Logo"
-                                    />
-                                    <button 
-                                      onClick={() => removeMaxCombinaisonsVideo('logo', 0)} 
-                                      className="absolute -top-2 -right-2 bg-red-500 hover:bg-red-600 text-white rounded-full p-1.5 shadow-lg transition-colors"
-                                      title="Remove logo"
-                                    >
-                                      <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
-                                        <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
-                                      </svg>
-                                    </button>
-                                  </div>
-                                </div>
-                                
-                                {/* Contrôle de taille */}
-                                <div className="space-y-2">
-                                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                                    Logo Size: {logoSize}%
-                                  </label>
-                                  <input
-                                    type="range"
-                                    min="5"
-                                    max="30"
-                                    value={logoSize}
-                                    onChange={(e) => setLogoSize(Number(e.target.value))}
-                                    className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-700 accent-purple-600"
-                                  />
-                                  <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400">
-                                    <span>5%</span>
-                                    <span>30%</span>
-                                  </div>
-                                </div>
-                                
-                                {/* Contrôle de position */}
-                                <div className="space-y-2">
-                                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                                    Logo Position
-                                  </label>
-                                  <div className="grid grid-cols-3 gap-2">
-                                    <button
-                                      onClick={() => setLogoPosition('top-left')}
-                                      className={`p-2 rounded-lg border-2 transition-colors ${
-                                        logoPosition === 'top-left'
-                                          ? 'bg-purple-100 border-purple-500 dark:bg-purple-900/50 dark:border-purple-400'
-                                          : 'bg-white border-gray-300 hover:border-purple-300 dark:bg-gray-800 dark:border-gray-600'
-                                      }`}
-                                      title="Top Left"
-                                    >
-                                      <svg className="w-4 h-4 mx-auto" viewBox="0 0 24 24" fill="currentColor">
-                                        <path d="M5 5h6v6H5z"/>
-                                      </svg>
-                                    </button>
-                                    <button
-                                      onClick={() => setLogoPosition('top-right')}
-                                      className={`p-2 rounded-lg border-2 transition-colors ${
-                                        logoPosition === 'top-right'
-                                          ? 'bg-purple-100 border-purple-500 dark:bg-purple-900/50 dark:border-purple-400'
-                                          : 'bg-white border-gray-300 hover:border-purple-300 dark:bg-gray-800 dark:border-gray-600'
-                                      }`}
-                                      title="Top Right"
-                                    >
-                                      <svg className="w-4 h-4 mx-auto" viewBox="0 0 24 24" fill="currentColor">
-                                        <path d="M13 5h6v6h-6z"/>
-                                      </svg>
-                                    </button>
-                                    <button
-                                      onClick={() => setLogoPosition('center')}
-                                      className={`p-2 rounded-lg border-2 transition-colors ${
-                                        logoPosition === 'center'
-                                          ? 'bg-purple-100 border-purple-500 dark:bg-purple-900/50 dark:border-purple-400'
-                                          : 'bg-white border-gray-300 hover:border-purple-300 dark:bg-gray-800 dark:border-gray-600'
-                                      }`}
-                                      title="Center"
-                                    >
-                                      <svg className="w-4 h-4 mx-auto" viewBox="0 0 24 24" fill="currentColor">
-                                        <path d="M9 9h6v6H9z"/>
-                                      </svg>
-                                    </button>
-                                    <button
-                                      onClick={() => setLogoPosition('bottom-left')}
-                                      className={`p-2 rounded-lg border-2 transition-colors ${
-                                        logoPosition === 'bottom-left'
-                                          ? 'bg-purple-100 border-purple-500 dark:bg-purple-900/50 dark:border-purple-400'
-                                          : 'bg-white border-gray-300 hover:border-purple-300 dark:bg-gray-800 dark:border-gray-600'
-                                      }`}
-                                      title="Bottom Left"
-                                    >
-                                      <svg className="w-4 h-4 mx-auto" viewBox="0 0 24 24" fill="currentColor">
-                                        <path d="M5 13h6v6H5z"/>
-                                      </svg>
-                                    </button>
-                                    <button
-                                      onClick={() => setLogoPosition('bottom-right')}
-                                      className={`p-2 rounded-lg border-2 transition-colors ${
-                                        logoPosition === 'bottom-right'
-                                          ? 'bg-purple-100 border-purple-500 dark:bg-purple-900/50 dark:border-purple-400'
-                                          : 'bg-white border-gray-300 hover:border-purple-300 dark:bg-gray-800 dark:border-gray-600'
-                                      }`}
-                                      title="Bottom Right"
-                                    >
-                                      <svg className="w-4 h-4 mx-auto" viewBox="0 0 24 24" fill="currentColor">
-                                        <path d="M13 13h6v6h-6z"/>
-                                      </svg>
-                                    </button>
-                                  </div>
-                                </div>
-                              </div>
-                            ) : (
-                              <div className="text-center py-8">
-                                <svg className="w-16 h-16 mx-auto text-gray-400 dark:text-gray-600 mb-3" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                  <rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" strokeWidth="2"/>
-                                  <circle cx="8.5" cy="8.5" r="1.5" fill="currentColor"/>
-                                  <path d="M21 15l-5-5L8 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                                </svg>
-                                <p className="text-sm text-gray-500 dark:text-gray-400">No logo uploaded</p>
-                                <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Upload a logo to customize its position and size</p>
-                              </div>
-                            )}
-                          </div>
-                        </section>
-
-                        {/* Summary */}
-                        <div className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-lg text-center [@media(min-width:1000px)]:col-span-2">
-                          <div className="text-sm font-medium text-blue-900 dark:text-blue-100 mb-2">
-                            Total combinations: {(() => {
-                              const counts = [
-                                maxCombinaisonsParts.part1.length,
-                                maxCombinaisonsParts.part2.length,
-                                maxCombinaisonsParts.part3.length,
-                                maxCombinaisonsParts.part4.length,
-                                maxCombinaisonsParts.part5.length,
-                                maxCombinaisonsParts.part6.length,
-                                maxCombinaisonsParts.part7.length,
-                                maxCombinaisonsParts.part8.length,
-                                maxCombinaisonsParts.part9.length,
-                                maxCombinaisonsParts.part10.length
-                              ];
-                              const product = counts.reduce((acc, count) => acc * (count || 1), 1);
-                              const hasAllParts = counts.every(count => count > 0);
-                              return hasAllParts ? product.toLocaleString() : '0';
-                            })()}
-                          </div>
-                          <div className="text-xs text-blue-700 dark:text-blue-300">
-                            Upload at least 1 video in each part (1-10) to generate combinations
-                          </div>
-                          {maxCombinaisonsParts.logo.length > 0 && (
-                            <div className="text-xs text-purple-600 dark:text-purple-400 mt-1">
-                              ✓ Logo will be added to all videos
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  ) : selectedModel === 'versus' ? (
+                  {selectedModel === 'versus' ? (
                     // Layout Versus - steps 3–10
                     <div className="col-span-1">
                       <div className="grid grid-cols-1 [@media(min-width:1000px)]:grid-cols-2 gap-4">
@@ -3928,24 +3127,7 @@ export default function CreatePage() {
                     <Button
                       onClick={handleCreateVideos}
                       disabled={
-                        selectedModel === 'max-combinaisons'
-                          ? (() => {
-                              const partsArray = [
-                                maxCombinaisonsParts.part1,
-                                maxCombinaisonsParts.part2,
-                                maxCombinaisonsParts.part3,
-                                maxCombinaisonsParts.part4,
-                                maxCombinaisonsParts.part5,
-                                maxCombinaisonsParts.part6,
-                                maxCombinaisonsParts.part7,
-                                maxCombinaisonsParts.part8,
-                                maxCombinaisonsParts.part9,
-                                maxCombinaisonsParts.part10
-                              ];
-                              const hasAllParts = partsArray.every(part => part.length > 0);
-                              return !hasAllParts || !selectedSong || isGenerating;
-                            })()
-                          : selectedModel === 'versus' 
+                        selectedModel === 'versus' 
                            ? (getVersusCombinationCount(versusParts, versusEnabled) === 0 || !selectedSong || isGenerating)
                           : (!selectedTemplate || selectedMediaIndexes.size === 0 || !selectedSong || !hooks || isGenerating)
                       }
@@ -3955,25 +3137,6 @@ export default function CreatePage() {
                         <div className="flex items-center justify-center w-full">
                           <span>Generating...</span>
                         </div>
-                      ) : selectedModel === 'max-combinaisons' ? (
-                        (() => {
-                          const counts = [
-                            maxCombinaisonsParts.part1.length,
-                            maxCombinaisonsParts.part2.length,
-                            maxCombinaisonsParts.part3.length,
-                            maxCombinaisonsParts.part4.length,
-                            maxCombinaisonsParts.part5.length,
-                            maxCombinaisonsParts.part6.length,
-                            maxCombinaisonsParts.part7.length,
-                            maxCombinaisonsParts.part8.length,
-                            maxCombinaisonsParts.part9.length,
-                            maxCombinaisonsParts.part10.length
-                          ];
-                          const product = counts.reduce((acc, count) => acc * (count || 1), 1);
-                          const hasAllParts = counts.every(count => count > 0);
-                          const logoText = maxCombinaisonsParts.logo.length > 0 ? ' (with logo)' : '';
-                          return hasAllParts ? `Create ${product.toLocaleString()} Max Videos${logoText}` : 'Create Videos';
-                        })()
                       ) : selectedModel === 'versus' ? (
                         `Create ${getVersusCombinationCount(versusParts, versusEnabled).toLocaleString()} Versus Videos`
                       ) : (
@@ -4294,26 +3457,6 @@ export default function CreatePage() {
                           objectFit="cover"
                           className="absolute inset-0"
                         />
-                        {/* Logo Overlay for Max Combinaisons */}
-                        {selectedModel === 'max-combinaisons' && maxCombinaisonsParts.logo.length > 0 && (
-                          <div className="absolute inset-0 pointer-events-none">
-                            <img
-                              src={URL.createObjectURL(maxCombinaisonsParts.logo[0])}
-                              alt="Logo"
-                              className="absolute"
-                              style={{
-                                width: `${logoSize}%`,
-                                height: 'auto',
-                                maxWidth: '300px',
-                                ...(logoPosition === 'top-left' && { top: '20px', left: '20px' }),
-                                ...(logoPosition === 'top-right' && { top: '20px', right: '20px' }),
-                                ...(logoPosition === 'center' && { top: '75%', left: '50%', transform: 'translate(-50%, -50%)' }),
-                                ...(logoPosition === 'bottom-left' && { bottom: '20px', left: '20px' }),
-                                ...(logoPosition === 'bottom-right' && { bottom: '20px', right: '20px' }),
-                              }}
-                            />
-                          </div>
-                        )}
                         <div className="relative w-full h-full">
                           <canvas
                             ref={canvasRef}

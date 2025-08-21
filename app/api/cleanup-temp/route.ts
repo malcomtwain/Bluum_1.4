@@ -1,56 +1,100 @@
 import { NextResponse } from 'next/server';
-import { readdir, unlink, stat } from 'fs/promises';
 import { join } from 'path';
+import { readdir, unlink, readFile } from 'fs/promises';
+import { existsSync } from 'fs';
 
-export async function GET() {
+// Importer les helpers pour l'export statique
+import { dynamic, generateStaticParams } from '../generateStaticParamsHelper';
+// Re-exporter pour cette route
+export { dynamic, generateStaticParams };
+
+// On conserve uniquement le runtime nodejs
+export const runtime = 'nodejs';
+
+// Cette API nettoie les fichiers vidéo temporaires expirés
+export async function GET(req: Request) {
   try {
-    const tempDir = process.env.NODE_ENV === 'production' ? '/tmp' : join(process.cwd(), 'public', 'temp-videos');
+    // Répertoire des vidéos temporaires
+    const tempDir = join(process.cwd(), 'public', 'temp-videos');
     
-    // Lire tous les fichiers dans le dossier temporaire
+    // Vérifier si le répertoire existe
+    if (!existsSync(tempDir)) {
+      return NextResponse.json({ 
+        success: true,
+        message: "Le répertoire temporaire n'existe pas encore",
+        deleted: 0 
+      });
+    }
+    
+    // Liste tous les fichiers
     const files = await readdir(tempDir);
-    const now = Date.now();
-    const fifteenMinutes = 15 * 60 * 1000;
-    let deletedCount = 0;
     
-    for (const file of files) {
-      // Ignorer les fichiers non-vidéo
-      if (!file.endsWith('.mp4')) continue;
-      
-      const filePath = join(tempDir, file);
-      
+    // Fichiers à supprimer
+    const videoFiles = files.filter(file => file.endsWith('.mp4'));
+    const metaFiles = files.filter(file => file.endsWith('.meta.json'));
+    
+    let deletedCount = 0;
+    const now = Date.now();
+    
+    // Parcourir tous les fichiers meta pour vérifier s'ils sont expirés
+    for (const metaFile of metaFiles) {
       try {
-        // Vérifier l'âge du fichier
-        const stats = await stat(filePath);
-        const fileAge = now - stats.mtimeMs;
+        const metaPath = join(tempDir, metaFile);
+        const metaContent = await readFile(metaPath, 'utf-8');
+        const meta = JSON.parse(metaContent);
         
-        // Supprimer si plus vieux que 15 minutes
-        if (fileAge > fifteenMinutes) {
-          await unlink(filePath);
-          deletedCount++;
-          console.log(`Deleted old temp file: ${file}`);
+        // Vérifier si le fichier est expiré
+        if (meta.expires && meta.expires < now) {
+          // Supprimer le fichier vidéo associé
+          const videoFileName = metaFile.replace('.meta.json', '');
+          const videoPath = join(tempDir, videoFileName);
           
-          // Essayer de supprimer le fichier meta associé
-          try {
-            await unlink(join(tempDir, `${file}.meta.json`));
-          } catch {
-            // Ignorer si le fichier meta n'existe pas
+          if (existsSync(videoPath)) {
+            await unlink(videoPath);
+            console.log(`Vidéo expirée supprimée: ${videoFileName}`);
           }
+          
+          // Supprimer le fichier meta
+          await unlink(metaPath);
+          console.log(`Fichier meta supprimé: ${metaFile}`);
+          
+          deletedCount++;
         }
       } catch (error) {
-        console.error(`Error processing file ${file}:`, error);
+        console.error(`Erreur lors du traitement du fichier meta ${metaFile}:`, error);
+      }
+    }
+    
+    // Nettoyer également les vidéos orphelines (sans fichier meta)
+    for (const videoFile of videoFiles) {
+      const metaFileName = `${videoFile}.meta.json`;
+      if (!metaFiles.includes(metaFileName)) {
+        try {
+          // Vérifier si le fichier vidéo a plus de 30 minutes
+          const videoPath = join(tempDir, videoFile);
+          const stats = await readFile(videoPath).then(() => ({ orphaned: true })).catch(() => ({ orphaned: false }));
+          
+          if (stats.orphaned) {
+            await unlink(videoPath);
+            console.log(`Vidéo orpheline supprimée: ${videoFile}`);
+            deletedCount++;
+          }
+        } catch (error) {
+          console.error(`Erreur lors de la suppression de la vidéo orpheline ${videoFile}:`, error);
+        }
       }
     }
     
     return NextResponse.json({ 
-      success: true, 
-      message: `Cleaned up ${deletedCount} old temporary files`,
-      deletedCount 
+      success: true,
+      message: `${deletedCount} fichiers temporaires expirés ont été supprimés`,
+      deleted: deletedCount
     });
   } catch (error) {
-    console.error('Error during cleanup:', error);
+    console.error('Erreur lors du nettoyage des fichiers temporaires:', error);
     return NextResponse.json({ 
       success: false, 
-      error: error instanceof Error ? error.message : 'Unknown error' 
+      error: error instanceof Error ? error.message : 'Erreur inconnue' 
     }, { status: 500 });
   }
-}
+} 

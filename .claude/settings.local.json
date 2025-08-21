@@ -1,27 +1,7 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git add:*)",
-      "Bash(git push:*)",
-      "Bash(git commit:*)",
-      "Bash(npm run dev:*)",
-      "Bash(npm run build:*)",
-      "Bash(grep:*)",
-      "Bash(gcloud run deploy:*)",
-      "Bash(curl:*)",
-      "Bash(git checkout:*)",
-      "Bash(git restore:*)",
-      "Bash(mkdir:*)",
-      "Bash(rm:*)",
-      "Bash(touch:*)",
-      "Bash(npm install:*)",
-      "Bash(npm uninstall:*)",
-      "Bash(npm ls:*)",
-      "Bash(npx tsc:*)",
-      "Bash(git merge:*)",
-      "Bash(cat:*)",
-      "Bash(echo:*)",
-      "Bash(chmod:*)"
+      "Bash(git add:*)"
     ],
     "deny": []
   }

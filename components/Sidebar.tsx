@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { VideoIcon, MusicIcon, PlusIcon, CreditCardIcon, SparklesIcon, TextIcon } from "lucide-react";
+import { VideoIcon, MusicIcon, PlusIcon, CreditCardIcon, SparklesIcon } from "lucide-react";
 import { useRouter, usePathname } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
@@ -152,7 +152,6 @@ export const Sidebar = () => {
                 </span>
               </div>
             </Button>
-
           </div>
         </nav>
 

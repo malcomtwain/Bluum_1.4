@@ -1,12 +1,7 @@
 {
-  "buildCommand": "npm run build",
-  "outputDirectory": ".next",
-  "framework": "nextjs",
-  "installCommand": "npm install && npm run postinstall",
   "build": {
     "env": {
-      "NEXT_PUBLIC_VERCEL_ENV": "production",
-      "VERCEL": "1"
+      "NEXT_PUBLIC_VERCEL_ENV": "production"
     }
   },
   "headers": [
@@ -28,10 +23,5 @@
       ]
     }
   ],
-  "regions": ["iad1"],
-  "functions": {
-    "app/api/**/*.ts": {
-      "maxDuration": 300
-    }
-  }
+  "regions": ["iad1"]
 }

@@ -1,7 +1,5 @@
 import { NextResponse } from 'next/server';
 import { updateProgress } from '@/lib/progress';
-import { getFFmpegPath, getFFprobePath } from '@/lib/ffmpeg-config';
-import { getVideoProcessor } from '@/lib/video-processor';
 
 // Lazy require Node APIs only on the server
 let pathModule: any = null;
@@ -68,16 +66,6 @@ type RequestBody = {
 
 export async function POST(req: Request) {
   try {
-    // Vérifier d'abord si le traitement vidéo est disponible
-    const processor = await getVideoProcessor();
-    if (!processor.isAvailable) {
-      console.error('FFmpeg not available');
-      return NextResponse.json({ 
-        success: false, 
-        error: 'FFmpeg not available. Please install FFmpeg on your system.'
-      }, { status: 503 });
-    }
-    
     const data: RequestBody = await req.json();
 
     if (data.mode !== 'versus') {
@@ -110,8 +98,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, error: 'No videos provided' }, { status: 400 });
     }
 
-    const tempDir = process.env.NODE_ENV === 'production' ? '/tmp' : join(process.cwd(), 'temp');
-    const tempOutputDir = process.env.NODE_ENV === 'production' ? '/tmp' : join(process.cwd(), 'public', 'temp-videos');
+    const tempDir = join(process.cwd(), 'temp');
+    const tempOutputDir = join(process.cwd(), 'public', 'temp-videos');
     await ensureDirectoryExists(tempDir);
     await ensureDirectoryExists(tempOutputDir);
 
@@ -184,11 +172,10 @@ export async function POST(req: Request) {
       const targetWidth = 1080;
       const targetHeight = 1920;
       let cmd = '';
-      const ffmpegPath = getFFmpegPath();
       if (isImg || p.type === 'image') {
-        cmd = `${ffmpegPath} -loop 1 -i "${src}" -t ${duration ?? 3} -vf "scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=increase,crop=${targetWidth}:${targetHeight},setsar=1" -c:v libx264 -pix_fmt yuv420p -r 30 "${scaled}"`;
+        cmd = `ffmpeg -loop 1 -i "${src}" -t ${duration ?? 3} -vf "scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=increase,crop=${targetWidth}:${targetHeight},setsar=1" -c:v libx264 -pix_fmt yuv420p -r 30 "${scaled}"`;
       } else {
-        cmd = `${ffmpegPath} -i "${src}" -vf "scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=increase,crop=${targetWidth}:${targetHeight},setsar=1" -c:v libx264 -pix_fmt yuv420p -r 30 "${scaled}"`;
+        cmd = `ffmpeg -i "${src}" -vf "scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=increase,crop=${targetWidth}:${targetHeight},setsar=1" -c:v libx264 -pix_fmt yuv420p -r 30 "${scaled}"`;
       }
       await execPromise(cmd);
       scaledPaths.push(scaled);
@@ -224,8 +211,7 @@ export async function POST(req: Request) {
     const songPath = await saveUrlToFile(data.song.url, 'song');
 
     const concatInputs = sequence.map((_, idx) => `[${idx}:v]`).join('');
-    const ffmpegPath = getFFmpegPath();
-    let finalCmd = `${ffmpegPath} ${inputs} -i "${songPath}" -filter_complex "${concatInputs}concat=n=${n}:v=1:a=0[outv];[${n}:a]aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo,atrim=0:${totalVideoDuration.toFixed(3)},asetpts=PTS-STARTPTS[outa]" -map "[outv]" -map "[outa]" -c:v libx264 -c:a aac -t ${totalVideoDuration.toFixed(3)} "${outputPath}"`;
+    let finalCmd = `ffmpeg ${inputs} -i "${songPath}" -filter_complex "${concatInputs}concat=n=${n}:v=1:a=0[outv];[${n}:a]aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo,atrim=0:${totalVideoDuration.toFixed(3)},asetpts=PTS-STARTPTS[outa]" -map "[outv]" -map "[outa]" -c:v libx264 -c:a aac -t ${totalVideoDuration.toFixed(3)} "${outputPath}"`;
 
     updateProgress(60);
     await execPromise(finalCmd);
@@ -264,8 +250,7 @@ export async function POST(req: Request) {
       if (position === 'middle') yPos = '(H-h)/2';
       else if (position === 'bottom') yPos = 'H-h-0';
       const scaleFactor = style === 1 ? '1.15' : '1';
-      const ffmpegPath = getFFmpegPath();
-      const overlayCmd = `${ffmpegPath} -i "${outputPath}" -i "${hookImagePath}" -filter_complex "[1:v]scale=iw*${scaleFactor}:-1[overlay];[0:v][overlay]overlay=(W-w)/2:${yPos}:format=auto,format=yuv420p[outv]" -map "[outv]" -map 0:a -c:v libx264 -c:a copy "${videoWithHookPath}"`;
+      const overlayCmd = `ffmpeg -i "${outputPath}" -i "${hookImagePath}" -filter_complex "[1:v]scale=iw*${scaleFactor}:-1[overlay];[0:v][overlay]overlay=(W-w)/2:${yPos}:format=auto,format=yuv420p[outv]" -map "[outv]" -map 0:a -c:v libx264 -c:a copy "${videoWithHookPath}"`;
       await execPromise(overlayCmd);
       await execPromise(`mv "${videoWithHookPath}" "${outputPath}"`);
     }
@@ -278,11 +263,7 @@ export async function POST(req: Request) {
       await fsPromises.writeFile(metaFilePath, JSON.stringify({ expires: expirationTime, created: Date.now() }));
     } catch {}
 
-    const videoPath = process.env.NODE_ENV === 'production' 
-      ? `/api/video/${outputFileName}` 
-      : `/temp-videos/${outputFileName}`;
-    
-    return NextResponse.json({ success: true, videoPath, expiresAt: expirationTime });
+    return NextResponse.json({ success: true, videoPath: `/temp-videos/${outputFileName}`, expiresAt: expirationTime });
   } catch (error) {
     console.error('Versus route error:', error);
     return NextResponse.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' }, { status: 500 });

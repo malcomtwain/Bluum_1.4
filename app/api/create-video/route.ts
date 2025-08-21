@@ -1,9 +1,5 @@
 import { NextResponse } from 'next/server';
 import { updateProgress, sendProgressToAPI } from '@/lib/progress';
-import { getFFmpegPath, getFFprobePath } from '@/lib/ffmpeg-config';
-
-// Configuration pour gérer les gros payloads
-export const maxDuration = 300; // 5 minutes max
 
 // CONDITIONNEMENT DES IMPORTS NATIFS
 // Ces imports ne seront utilisés que côté serveur, pas pendant la compilation
@@ -29,7 +25,6 @@ if (typeof window === 'undefined') {
     import('node-fetch').then(module => {
       nodeFetch = module.default;
     });
-    
   } catch (error) {
     console.error('Erreur lors de l\'import des modules natifs:', error);
   }
@@ -214,7 +209,7 @@ export async function POST(req: Request) {
     // Créer le dossier de sortie s'il n'existe pas
     // Nous utilisons un dossier public temporaire qui sera accessible
     // depuis le navigateur mais nettoyé régulièrement
-    const tempOutputDir = process.env.NODE_ENV === 'production' ? '/tmp' : join(process.cwd(), 'public', 'temp-videos');
+    const tempOutputDir = join(process.cwd(), 'public', 'temp-videos');
     await ensureDirectoryExists(tempOutputDir);
 
     // Générer un nom de fichier unique
@@ -223,7 +218,7 @@ export async function POST(req: Request) {
     const outputPath = join(tempOutputDir, outputFileName);
 
     // Sauvegarder les fichiers temporaires si ce sont des URLs de données
-    const tempDir = process.env.NODE_ENV === 'production' ? '/tmp' : join(process.cwd(), 'temp');
+    const tempDir = join(process.cwd(), 'temp');
     await ensureDirectoryExists(tempDir);
 
     // Fonction pour sauvegarder une URL en fichier temporaire
@@ -404,7 +399,7 @@ export async function POST(req: Request) {
               // Chercher dans différents dossiers possibles
               const possiblePaths = [
                 join(process.cwd(), 'public', 'uploads', fileName || ''),
-                process.env.NODE_ENV === 'production' ? join('/tmp', fileName || '') : join(process.cwd(), 'temp', fileName || ''),
+                join(process.cwd(), 'temp', fileName || ''),
                 join(tempDir, fileName || ''),
                 join(process.cwd(), 'public', fileName || '')
               ];
@@ -433,8 +428,7 @@ export async function POST(req: Request) {
                     console.log(`Suppression de l'audio pour la vidéo ${prefix}`);
                     const noAudioPath = join(tempDir, `${prefix}_noaudio_${timestamp}${extension}`);
                     try {
-                      const ffmpegPath = getFFmpegPath();
-                      await execPromise(`${ffmpegPath} -i "${tempPath}" -c:v copy -an "${noAudioPath}"`);
+                      await execPromise(`ffmpeg -i "${tempPath}" -c:v copy -an "${noAudioPath}"`);
                       console.log(`Audio supprimé pour ${prefix}, nouveau fichier: ${noAudioPath}`);
                       return noAudioPath;
                     } catch (error) {
@@ -479,8 +473,7 @@ export async function POST(req: Request) {
             console.log(`Suppression de l'audio pour la vidéo ${prefix}`);
             const noAudioPath = join(tempDir, `${prefix}_noaudio_${timestamp}${pathModule ? pathModule.extname(absolutePath) : '.jpg'}`);
             try {
-              const ffmpegPath = getFFmpegPath();
-              await execPromise(`${ffmpegPath} -i "${absolutePath}" -c:v copy -an "${noAudioPath}"`);
+              await execPromise(`ffmpeg -i "${absolutePath}" -c:v copy -an "${noAudioPath}"`);
               console.log(`Audio supprimé pour ${prefix}, nouveau fichier: ${noAudioPath}`);
               return noAudioPath;
             } catch (error) {
@@ -527,8 +520,7 @@ export async function POST(req: Request) {
             console.log(`Suppression de l'audio pour la vidéo ${prefix}`);
             const noAudioPath = join(tempDir, `${prefix}_noaudio_${timestamp}${extension}`);
             try {
-              const ffmpegPath = getFFmpegPath();
-              await execPromise(`${ffmpegPath} -i "${tempPath}" -c:v copy -an "${noAudioPath}"`);
+              await execPromise(`ffmpeg -i "${tempPath}" -c:v copy -an "${noAudioPath}"`);
               console.log(`Audio supprimé pour ${prefix}, nouveau fichier: ${noAudioPath}`);
               return noAudioPath;
             } catch (error) {
@@ -549,8 +541,7 @@ export async function POST(req: Request) {
           console.log(`Suppression de l'audio pour la vidéo ${prefix}`);
           const noAudioPath = join(tempDir, `${prefix}_noaudio_${timestamp}${pathModule ? pathModule.extname(url) : '.jpg'}`);
           try {
-            const ffmpegPath = getFFmpegPath();
-            await execPromise(`${ffmpegPath} -i "${url}" -c:v copy -an "${noAudioPath}"`);
+            await execPromise(`ffmpeg -i "${url}" -c:v copy -an "${noAudioPath}"`);
             console.log(`Audio supprimé pour ${prefix}, nouveau fichier: ${noAudioPath}`);
             return noAudioPath;
           } catch (error) {
@@ -637,8 +628,7 @@ export async function POST(req: Request) {
     let hasSongAudio = false;
     try {
       // Utiliser ffprobe pour vérifier si le fichier contient un flux audio
-      const ffprobePath = getFFprobePath();
-      const { stdout } = await execPromise(`"${ffprobePath}" -v error -select_streams a -show_entries stream=codec_type -of csv=p=0 "${cleanSongPath}"`);
+      const { stdout } = await execPromise(`ffprobe -v error -select_streams a -show_entries stream=codec_type -of csv=p=0 "${cleanSongPath}"`);
       hasSongAudio = stdout.trim().includes('audio');
       console.log(`Le fichier song contient-il de l'audio ? ${hasSongAudio ? 'Oui' : 'Non'}`);
     } catch (error) {
@@ -669,25 +659,21 @@ export async function POST(req: Request) {
     
     if (isPart1Image) {
       console.log(`Conversion de l'image Part 1 en vidéo de ${part1Duration}s`);
-      const ffmpegPath = getFFmpegPath();
-      part1Cmd = `${ffmpegPath} -loop 1 -i "${cleanPart1Path}" -t ${part1Duration} -vf "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920:0:${part1.position === 'top' ? '0' : part1.position === 'bottom' ? 'ih-1920' : '(ih-1920)/2'},setsar=1" -c:v libx264 -pix_fmt yuv420p -r 30 "${part1Scaled}"`;
+      part1Cmd = `ffmpeg -loop 1 -i "${cleanPart1Path}" -t ${part1Duration} -vf "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920:0:${part1.position === 'top' ? '0' : part1.position === 'bottom' ? 'ih-1920' : '(ih-1920)/2'},setsar=1" -c:v libx264 -pix_fmt yuv420p -r 30 "${part1Scaled}"`;
     } else {
       // Si Part 1 est une vidéo, la redimensionner et limiter sa durée
       console.log(`Redimensionnement de la vidéo Part 1 et limitation à ${part1Duration}s`);
-      const ffmpegPath = getFFmpegPath();
-      part1Cmd = `${ffmpegPath} -i "${cleanPart1Path}" -t ${part1Duration} -vf "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920:0:${part1.position === 'top' ? '0' : part1.position === 'bottom' ? 'ih-1920' : '(ih-1920)/2'},setsar=1" -c:v libx264 -pix_fmt yuv420p -r 30 "${part1Scaled}"`;
+      part1Cmd = `ffmpeg -i "${cleanPart1Path}" -t ${part1Duration} -vf "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920:0:${part1.position === 'top' ? '0' : part1.position === 'bottom' ? 'ih-1920' : '(ih-1920)/2'},setsar=1" -c:v libx264 -pix_fmt yuv420p -r 30 "${part1Scaled}"`;
     }
     
     if (isPart2Image) {
       // Si Part 2 est une image, la convertir en vidéo avec la durée spécifiée
       console.log(`Conversion de l'image Part 2 en vidéo de ${selectedPart2Duration}s`);
-      const ffmpegPath = getFFmpegPath();
-      part2Cmd = `${ffmpegPath} -loop 1 -i "${cleanPart2Path}" -t ${selectedPart2Duration} -vf "scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=decrease,pad=${targetWidth}:${targetHeight}:(ow-iw)/2:(oh-ih)/2:color=black" -c:v libx264 -pix_fmt yuv420p -r 30 "${part2Scaled}"`;
+      part2Cmd = `ffmpeg -loop 1 -i "${cleanPart2Path}" -t ${selectedPart2Duration} -vf "scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=decrease,pad=${targetWidth}:${targetHeight}:(ow-iw)/2:(oh-ih)/2:color=black" -c:v libx264 -pix_fmt yuv420p -r 30 "${part2Scaled}"`;
     } else {
       // Si Part 2 est une vidéo, la redimensionner et limiter sa durée
       console.log(`Redimensionnement de la vidéo Part 2 à ${selectedPart2Duration}s`);
-      const ffmpegPath = getFFmpegPath();
-      part2Cmd = `${ffmpegPath} -i "${cleanPart2Path}" -t ${selectedPart2Duration} -vf "scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=decrease,pad=${targetWidth}:${targetHeight}:(ow-iw)/2:(oh-ih)/2:color=black" -c:v libx264 -pix_fmt yuv420p -r 30 "${part2Scaled}"`;
+      part2Cmd = `ffmpeg -i "${cleanPart2Path}" -t ${selectedPart2Duration} -vf "scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=decrease,pad=${targetWidth}:${targetHeight}:(ow-iw)/2:(oh-ih)/2:color=black" -c:v libx264 -pix_fmt yuv420p -r 30 "${part2Scaled}"`;
     }
     
     // Exécuter les commandes pour préparer les parties
@@ -704,11 +690,10 @@ export async function POST(req: Request) {
     
     // Commande finale utilisant directement les fichiers dans l'ordre NORMAL
     let finalCommand = '';
-    const ffmpegPath = getFFmpegPath();
     
     if (hasSongAudio) {
       // Ordre normal: part1 d'abord (input 0), puis part2 (input 1)
-      finalCommand = `${ffmpegPath} -i "${part1Scaled}" -i "${part2Scaled}" -i "${cleanSongPath}" ` +
+      finalCommand = `ffmpeg -i "${part1Scaled}" -i "${part2Scaled}" -i "${cleanSongPath}" ` +
         `-filter_complex "[0:v][1:v]concat=n=2:v=1:a=0[outv];[2:a]aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo[outa]" ` +
         `-map "[outv]" -map "[outa]" -c:v libx264 -c:a aac -shortest "${outputPath}"`;
       
@@ -716,7 +701,7 @@ export async function POST(req: Request) {
       console.log(`1er (Input 0): ${part1Scaled} (Part 1)`);
       console.log(`2nd (Input 1): ${part2Scaled} (Part 2)`);
     } else {
-      finalCommand = `${ffmpegPath} -i "${part1Scaled}" -i "${part2Scaled}" ` +
+      finalCommand = `ffmpeg -i "${part1Scaled}" -i "${part2Scaled}" ` +
         `-filter_complex "[0:v][1:v]concat=n=2:v=1:a=0[outv]" ` +
         `-map "[outv]" -c:v libx264 "${outputPath}"`;
       
@@ -902,8 +887,7 @@ export async function POST(req: Request) {
         const scaleFactor = hook.style === 1 ? "1.15" : "1";
         
         // Commande pour superposer l'image du hook sur la vidéo avec position et redimensionnement
-        const ffmpegPath = getFFmpegPath();
-        const overlayCommand = `${ffmpegPath} -i "${outputPath}" -i "${hookImagePath}" -filter_complex ` +
+        const overlayCommand = `ffmpeg -i "${outputPath}" -i "${hookImagePath}" -filter_complex ` +
           `"[1:v]scale=iw*${scaleFactor}:-1[overlay];[0:v][overlay]overlay=(W-w)/2:${yPosition}:format=auto,format=yuv420p[outv]" ` +
           `-map "[outv]" -map 0:a -c:v libx264 -c:a copy "${videoWithHookPath}"`;
         
@@ -922,10 +906,8 @@ export async function POST(req: Request) {
       updateProgress(100);
       
       // Après la génération de la vidéo et avant de retourner la réponse
-      // En production, utiliser l'API route pour servir la vidéo depuis /tmp
-      const tempVideoPath = process.env.NODE_ENV === 'production' 
-        ? `/api/video/${outputFileName}` 
-        : `/temp-videos/${outputFileName}`;
+      // Pas besoin d'uploader sur Supabase, on utilise directement le chemin temporaire
+      const tempVideoPath = `/temp-videos/${outputFileName}`;
       
       // Stocker l'information de délai d'expiration dans un fichier à côté de la vidéo
       // pour faciliter le nettoyage ultérieur
